@@ -1,0 +1,52 @@
+name: Download ISO to Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      file_url:
+        description: 'Direct URL of the file'
+        required: true
+        default: 'https://iso.ryoku.dev/stable/ryoku-2026.09.26-r217-cfd8899-x86_64-v0.75.3-beta.20.iso'
+      tag:
+        description: 'Release tag'
+        required: true
+        default: 'ryoku-2026.09.26'
+
+permissions:
+  contents: write
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download file and split if needed
+        run: |
+          URL="${{ github.event.inputs.file_url }}"
+          FILE=$(basename "$URL")
+          echo "FILE=$FILE" >> $GITHUB_ENV
+
+          echo "Downloading $URL ..."
+          curl -L --fail --retry 3 --retry-delay 5 -o "$FILE" "$URL"
+
+          ls -lh "$FILE"
+          SIZE=$(stat -c%s "$FILE")
+
+          if [ "$SIZE" -gt 2000000000 ]; then
+            echo "File is larger than 2GB. Splitting into 1900MB parts..."
+            split -b 1900M -d -a 2 "$FILE" "${FILE}.part"
+            ls -lh "${FILE}.part"*
+            echo "FILES=${FILE}.part*" >> $GITHUB_ENV
+          else
+            echo "FILES=$FILE" >> $GITHUB_ENV
+          fi
+
+      - name: Upload to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.event.inputs.tag }}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" $FILES --clobber
+          else
+            gh release create "$TAG" $FILES --title "$TAG" --notes "Downloaded from ${{ github.event.inputs.file_url }}"
+          fi
